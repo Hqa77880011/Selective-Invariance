@@ -30,8 +30,10 @@ class Model(nn.Module):
         )
         self.head = nn.Linear(64, cfg["classes"])
         self.teacher = None
+        self.excluded_groups = set()
         if method in ("selective", "random_gate", "no_uncertainty", "no_risk_control"):
             payload = torch.load(cfg["gate_checkpoint"], map_location="cpu", weights_only=False)
+            self.excluded_groups = set(payload["audit_groups"]) | set(payload["teacher_groups"])
             self.teacher = Model(cfg, "erm")
             self.teacher.load_state_dict(payload["teacher"])
             self.gates = nn.ModuleList(

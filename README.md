@@ -39,7 +39,7 @@ python -m selective train --config configs/default.json --data data/prepared --m
 python -m selective.gate --checkpoint runs/teacher/erm/model.pt --train-pairs data/audit_train.npz --calibration-pairs data/audit_calibration.npz --output runs/gate.pt
 ```
 
-The audited pair files use x, x_pair, transform and valid. Keep their source objects separate. After gate fitting, run the full training commands above. Retain the gate artifact alongside the classifier checkpoint.
+The audited pair files use x, x_pair, transform, valid and group. Teacher checkpoints record all fitting/validation group IDs. Gate fitting rejects overlap among teacher objects, audit-training objects and calibration objects, and requires one pair per independent calibration object. Student training/evaluation reject overlap with the frozen teacher/gate objects; evaluation also excludes the student fitting/validation objects. Rebuild older gate artifacts without this provenance. After gate fitting, run the full training commands above. Retain the gate artifact alongside the classifier checkpoint.
 
 
 
@@ -89,3 +89,19 @@ python -m selective.cifar --output data/raw.npz
 This downloads the author dataset through TorchVision, reserves 10% of its training images for validation, and preserves the original test set. It writes fine/coarse labels, source IDs and task metadata. Paired/audited transformation fields and ontology constraints must be added from the registered pair/ontology protocol before using those objectives.
 
 Inference timing runs the deployment forward pass separately from calibration, commutation and other evaluator diagnostics, after one warmup. Batch P50/P95 and examples/s retain the configured batch size. MAC/FLOP counts cover Conv/Linear/GRU multiply-adds; process RSS includes the dataset and Python runtime.
+
+## Registered compact reproduction setting
+
+Three-class dominant-color RGB objects with red/blue mixing. Green objects retain class at all strengths, while strong mixing changes red/blue class: validity is analytically audited from rendered content, independent of learned predictions. Seven disjoint object pools train teacher, gate, threshold and task models.
+
+Run from the repository root after installation. The following commands use the registered setting; they are provided for execution and have not been run as part of the source review.
+
+```bash
+python -m selective.controlled --objects-per-split 300 --size 24 --seed 17 --output data/reproduce
+python -m selective train --config configs/reproduce.json --data data/reproduce/teacher --methods erm --output runs/reproduce_teacher
+python -m selective.gate --checkpoint runs/reproduce_teacher/erm/model.pt --train-pairs data/reproduce/audit_train.npz --calibration-pairs data/reproduce/audit_calibration.npz --risk 0.1 --minimum-coverage 0.1 --output runs/reproduce_gate.pt
+python -m selective suite --config configs/reproduce.json --data data/reproduce/task --output runs/reproduce
+python -m selective evaluate --checkpoint runs/reproduce/selective/model.pt --data data/reproduce/task/test.npz --output results/reproduce
+```
+
+This setting needs no external dataset or pretrained weights. Generated inputs and declared fault/shift laws define the finite task; reported quantities retain that provenance.

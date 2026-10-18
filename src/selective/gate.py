@@ -11,6 +11,20 @@ from torch.nn import functional as F
 from .core import Model
 
 
+def audit_groups(training, calibration, teacher_groups):
+    """Require independent calibration objects, separate from all fitting objects."""
+    if not teacher_groups:
+        raise ValueError("Teacher checkpoint must record its fitting/validation object IDs")
+    train = set(map(str, training["group"].tolist()))
+    ids = list(map(str, calibration["group"].tolist()))
+    calibrate = set(ids)
+    if len(calibrate) != len(ids):
+        raise ValueError("Use one audited pair per independent calibration object")
+    if train & calibrate or (train | calibrate) & set(teacher_groups):
+        raise ValueError("Teacher fitting, audit training and calibration objects overlap")
+    return sorted(train | calibrate)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
@@ -23,6 +37,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--seed", type=int, default=17)
     args = parser.parse_args()
+    if not 0 < args.risk < 1 or not 0 < args.confidence < 1 or not 0 < args.minimum_coverage <= 1:
+        parser.error("risk/confidence must lie in (0,1), minimum coverage in (0,1]")
     torch.manual_seed(args.seed)
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     cfg = payload["config"]
@@ -30,16 +46,21 @@ def main():
     teacher.load_state_dict(payload["state"])
     teacher.eval()
 
-    def features(path):
-        arrays = dict(np.load(path, allow_pickle=False))
+    training = dict(np.load(args.train_pairs, allow_pickle=False))
+    calibration = dict(np.load(args.calibration_pairs, allow_pickle=False))
+    independent = audit_groups(training, calibration, payload.get("fit_groups"))
+
+    def features(arrays):
+        if not len(arrays["valid"]) or not np.isin(arrays["valid"], [0, 1]).all():
+            raise ValueError("Audited pair validity must be nonempty and binary")
         with torch.no_grad():
             _, a = teacher(torch.tensor(arrays["x"]))
             _, b = teacher(torch.tensor(arrays["x_pair"]))
         x = torch.cat([a, b, a - b, torch.tensor(arrays["transform"], dtype=torch.float32)], -1)
         return x, torch.tensor(arrays["valid"], dtype=torch.float32)
 
-    x, y = features(args.train_pairs)
-    cx, cy = features(args.calibration_pairs)
+    x, y = features(training)
+    cx, cy = features(calibration)
     gates = []
     rng = np.random.default_rng(args.seed)
     for _ in range(3):
@@ -81,12 +102,19 @@ def main():
             "threshold": threshold,
             "coverage": coverage,
             "risk_upper": upper,
+            "candidate_count": len(thresholds),
+            "risk": args.risk,
+            "confidence": args.confidence,
+            "audit_groups": independent,
+            "teacher_groups": payload["fit_groups"],
             "config": cfg,
         },
         output,
     )
     output.with_suffix(".json").write_text(
-        json.dumps({"threshold": threshold, "coverage": coverage, "risk_upper": upper}, indent=2),
+        json.dumps({"threshold": threshold, "coverage": coverage, "risk_upper": upper,
+                    "candidate_count": len(thresholds), "risk": args.risk,
+                    "confidence": args.confidence}, indent=2),
         encoding="utf-8",
     )
 

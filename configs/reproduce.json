@@ -1,0 +1,14 @@
+{
+  "seed": 17,
+  "device": "cpu",
+  "epochs": 20,
+  "patience": 5,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0001,
+  "classes": 3,
+  "transform_dimensions": 1,
+  "uncertainty_weight": 1,
+  "consistency_weight": 0.1,
+  "gate_checkpoint": "runs/reproduce_gate.pt"
+}
